@@ -14,12 +14,12 @@ DevOpsFetch is a shell script tool designed to retrieve and display various syst
 
 2. **Make the Script Executable**
    ```sh
-   chmod +x devopsfetch.sh
+   chmod +x devopsfetch
    ```
 
 3. **Move the Script to a Directory in Your PATH**
    ```sh
-   sudo mv devopsfetch.sh /usr/local/bin/devopsfetch
+   sudo mv devopsfetch /usr/local/bin/devopsfetch
    ```
 
 4. **Set Up Log Directory and Permissions**
@@ -60,7 +60,7 @@ The script can be invoked with various command-line flags to retrieve different 
      ```
    - Get configuration details for a specific domain:
      ```sh
-     devopsfetch -n abasifreke.site
+     devopsfetch -n abasifreke.hng
      ```
 
 4. **Users and Last Login Times**
@@ -70,7 +70,7 @@ The script can be invoked with various command-line flags to retrieve different 
      ```
    - Get detailed information for a specific user:
      ```sh
-     devopsfetch -u ubuntu
+     devopsfetch -u abas
      ```
 
 5. **System Activities**
@@ -82,7 +82,7 @@ The script can be invoked with various command-line flags to retrieve different 
      ```sh
      devopsfetch -t '2024-07-03 00:00:00' '2024-07-03 23:59:59'
      ```
-
+ 
 6. **Help**
    - Display help message:
      ```sh
@@ -110,7 +110,3 @@ You can view the logs using standard file viewing commands:
   ```sh
   tail -f /var/log/devopsfetch/devopsfetch.log
   ```
-
-## Conclusion
-
-DevOpsFetch is a versatile tool for system administrators to monitor and retrieve essential system information. By following the installation steps and using the provided examples, you can efficiently utilize this tool in your daily operations. For further assistance, refer to the help section using the `-h` flag.
