@@ -1,0 +1,249 @@
+#!/bin/bash
+
+# Function to format output as an ASCII table
+format_table() {
+    # Use column command for initial formatting
+    formatted=$(column -t -s $'\t')
+
+    # Get the number of columns and rows
+    num_columns=$(head -n1 <<< "$formatted" | wc -w)
+    num_rows=$(wc -l <<< "$formatted")
+
+    # Create the horizontal line
+    horiz_line=$(printf '+-%0.s-' $(seq 1 $num_columns) | sed 's/-$/+/')
+
+    # Print the top border
+    echo "$horiz_line"
+
+    # Print header with borders
+    head -n1 <<< "$formatted" | sed 's/^/| /' | sed 's/ /  /g' | sed 's/$/  |/'
+    echo "$horiz_line"
+
+    # Print data rows with borders
+    tail -n +2 <<< "$formatted" | sed 's/^/| /' | sed 's/ /  /g' | sed 's/$/  |/'
+
+    # Print the bottom border
+    echo "$horiz_line"
+}
+
+get_time_info() {
+    if [[ -z "$2" ]]; then 
+        echo "Activities on $1:"
+        journalctl --since "$1" --until "$1 23:59:59" | tail -n 50 
+    else
+        echo "Activities between $1 and $2:"
+        journalctl --since "$1" --until "$2" | tail -n 50
+    fi
+}
+
+get_port_info() {
+    if [ -z "$1" ]; then
+        echo "Active Ports and Services:"
+        printf "%-15s %-20s %-20s\n" "Port" "User" "Service"
+        sudo ss -tuln | awk 'NR>1 {print $5}' | awk -F: '{print $NF}' | sort -n | uniq | \
+        while read port; do
+            sudo lsof -i :$port | awk 'NR==2 {printf "%-15s %-20s %-20s\n", "'$port'", $3, $1}'
+        done | column -t -s $'\t'
+    else
+        echo "Information for Port $1:"
+        sudo lsof -i :$1 | awk '{print $1,$2,$3,$5,$8}' | sort -k 5| column -t
+    fi
+}
+
+get_nginx_info() {
+    search_nginx_config() {
+        local domain="$1"
+        local config_files=("/etc/nginx/sites-enabled/*" "/etc/nginx/conf.d/*")
+
+        for config_file_pattern in "${config_files[@]}"; do
+            for config_file in $config_file_pattern; do
+                if [ -r "$config_file" ]; then
+                    if grep -q "server_name $domain" "$config_file"; then
+                        echo "$config_file"
+                        return 0
+                    fi
+                fi
+            done
+        done
+        return 1
+    }
+
+    if [ -z "$1" ]; then
+        echo "Nginx Domains and Ports:"
+        {
+            echo -e "Domain\tPort"
+            for config_file in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*; do
+                if [ -r "$config_file" ]; then
+                    domain=$(grep -h 'server_name' "$config_file" 2>/dev/null | awk '{print $2}' | sed 's/;//')
+                    port=$(grep -h 'listen' "$config_file" 2>/dev/null | grep -v '#' | awk '{print $2}' | sed 's/;//' | head -n1)
+                    if [ -n "$domain" ]; then
+                        echo -e "$domain\t$port"
+                    fi
+                fi
+            done
+        } | column -t -s $'\t'
+    else
+        echo "Configuration for Domain $1:"
+        config_file=$(search_nginx_config "$1")
+        if [ -n "$config_file" ]; then
+            listen_port=$(grep -m 1 'listen' "$config_file" | awk '{print $2}' | sed 's/;//')
+            proxy_pass=$(grep -m 1 'proxy_pass' "$config_file" | awk '{print $2}' | sed 's/;//')
+            printf "Domain\tPort\tProxying To\n%s\t%s\t%s\n" "$1" "$listen_port" "$proxy_pass" | column -t -s $'\t'
+        else
+            echo "No configuration found for domain $1"
+        fi
+    fi
+}
+
+get_docker_info() {
+    if [ -z "$1" ]; then
+        echo "Docker Images:"
+        docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}"
+        echo -e "\nDocker Containers:"
+        docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+    else
+        echo "Container Details for $1:"
+        (
+            echo -e "Information\tValue"
+            docker inspect $1 | jq -r '.[0] | 
+                "ID\t\(.Id)",
+                "Name\t\(.Name)",
+                "Status\t\(.State.Status)",
+                "Image\t\(.Config.Image)",
+                "Created\t\(.Created)",
+                "IP Address\t\(.NetworkSettings.IPAddress)",
+                "Port Mappings\t\(.NetworkSettings.Ports | to_entries | map("\(.key) -> \(.value[0].HostPort)") | join(", "))",
+                "Volumes\t\(.Mounts | map("\(.Source) -> \(.Destination)") | join(", "))",
+                "Environment\t\(.Config.Env | join(", "))",
+                "Command\t\(.Config.Cmd | join(" "))",
+                "Restart Policy\t\(.HostConfig.RestartPolicy.Name)",
+                "Network Mode\t\(.HostConfig.NetworkMode)",
+                "CPU Shares\t\(.HostConfig.CpuShares)",
+                "Memory Limit\t\(.HostConfig.Memory)",
+                "Exposed Ports\t\(.Config.ExposedPorts | keys | join(", "))",
+                "Hostname\t\(.Config.Hostname)",
+                "Entrypoint\t\(.Config.Entrypoint | join(" "))",
+                "Working Directory\t\(.Config.WorkingDir)",
+                "User\t\(.Config.User)",
+                "Labels\t\(.Config.Labels | to_entries | map("\(.key)=\(.value)") | join(", "))"
+            '
+        ) | column -t -s $'\t'
+    fi
+}
+
+get_users_info() {
+    print_horizontal_line() {
+        printf '+--------------------+---------------------------+\n'
+    }
+
+    print_table_row() {
+        printf "| %-18s | %-25s |\n" "$1" "$2"
+    }
+
+    get_user_info() {
+        local user="$1"
+        local login_time=$(last -n 1 "$user" | awk 'NR==1 {print $4, $5, $6, $7}')
+        
+        if [ -z "$login_time" ]; then
+            login_time="N/A"
+        fi
+        
+        echo -e "$user\t$login_time"
+    }
+
+    if [ -z "$1" ]; then
+        echo "Users and Login Times:"
+        print_horizontal_line
+        print_table_row "Username" "Last Login Time"
+        print_horizontal_line
+        
+        # Get all users with home directories
+        users=$(awk -F: '$6 ~ /^\/home/ {print $1}' /etc/passwd)
+        
+        if [ -z "$users" ]; then
+            print_table_row "No users found" "N/A"
+        else
+            for user in $users; do
+                IFS=$'\t' read -r username login_time <<< "$(get_user_info "$user")"
+                print_table_row "$username" "$login_time"
+            done
+        fi
+        
+        print_horizontal_line
+ 
+    else
+        (
+        echo "Information for User $1:"
+        echo -e "Information\tValue"
+        echo -e "Username\t$1"
+        echo -e "UID\t$(id -u $1)"
+        echo -e "Primary Group\t$(id -gn $1)"
+        echo -e "Groups\t$(id -Gn $1 | tr ' ' ',')"
+        echo -e "Shell\t$(getent passwd $1 | cut -d: -f7)"
+        echo -e "Home Directory\t$(getent passwd $1 | cut -d: -f6)"
+        echo -e "Full Name\t$(getent passwd $1 | cut -d: -f5 | cut -d, -f1)"
+        echo -e "Account Expiration\t$(sudo chage -l $1 | grep 'Account expires' | cut -d: -f2-)"
+        echo -e "Password Expiration\t$(sudo chage -l $1 | grep 'Password expires' | cut -d: -f2-)"
+        echo -e "Failed Login Attempts\t$(sudo faillog -u $1 | awk 'NR==2 {print $3}')"
+        echo -e "Last Login\t$(last -1 $1 | awk 'NR==1 {print $3, $4, $5, $6, $7}')"
+        echo -e "Last Login From\t$(last -1 $1 | awk 'NR==1 {print $3}')"
+        echo -e "Current Login Status\t$(w -h | grep $1 > /dev/null && echo "Logged In" || echo "Not Logged In")"
+    ) | column -t -s $'\t'
+    
+    fi
+}
+
+log_output() {
+    tee -a /var/log/devopsfetch.log
+}
+
+display_help() {
+    echo "Usage: devopsfetch <OPTION> <ARGUMENT>"
+    echo "Retrieve and display system information."
+    echo
+    echo "Options:"
+    echo "  -p, --port <PORT>     Display active ports or specific port info"
+    echo "  -d, --docker <NAME>   List Docker images/containers or specific container info"
+    echo "  -n, --nginx <DOMAIN>  Display Nginx domains or specific domain config"
+    echo "  -u, --users <USER>    List users and last login or specific user info"
+    echo "  -t, --time <DATE|START END>  Display activities on a specific date or within a time range (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)"
+    echo "  -h, --help            Display this help message"
+    echo
+    echo "Examples:"
+    echo "  devopsfetch -p"
+    echo "  devopsfetch -p 80"
+    echo "  devopsfetch -d"
+    echo "  devopsfetch -d container_name"
+    echo "  devopsfetch -n"
+    echo "  devopsfetch -n abasifreke.site"
+    echo "  devopsfetch -u"
+    echo "  devopsfetch -u ubuntu"
+    echo "  devopsfetch -t '2024-07-03'"
+    echo "  devopsfetch -t '2024-07-03 00:00:00' '2024-07-02 23:59:59'"
+}
+
+# Main logic
+case "$1" in
+    -p|--port)
+        get_port_info "$2"
+        ;;
+    -d|--docker)
+        get_docker_info "$2"
+        ;;
+    -n|--nginx)
+        get_nginx_info "$2"
+        ;;
+    -u|--users)
+        get_users_info "$2"
+        ;;
+    -t|--time)
+        get_time_info "$2" "$3"
+        ;;
+    -h|--help)
+        display_help
+        ;;
+    *)
+        echo "Invalid option. Use -h or --help for usage information." | log_output
+        exit 1
+        ;;
+esac
