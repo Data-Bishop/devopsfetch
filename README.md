@@ -5,29 +5,104 @@
 DevOpsFetch is a shell script tool designed to retrieve and display various system information such as active ports, Docker images and containers, Nginx domains, user login details, and system activities. The output is formatted as readable ASCII tables for better clarity.
 
 ## Installation and Configuration
+The installation is performed by the installation script.
 
-1. **Clone the Repository**
+This installation script sets up the `DevOpsFetch` tool by copying the main script to the appropriate directory, creating necessary log files, configuring a systemd service and timer, and setting up log rotation. This script ensures that `DevOpsFetch` runs automatically every 5 minutes and logs its output to a specified log file.
+
+## Prerequisites
+
+- The script must be run as the root user or with `sudo` privileges.
+
+## Installation Steps implemented in the script
+
+1. **Copies the Main Script to /usr/local/bin**
    ```sh
-   git clone <repository_url>
-   cd <repository_directory>
+   cp devopsfetch /usr/local/bin/devopsfetch
+   chmod +x /usr/local/bin/devopsfetch
    ```
 
-2. **Make the Script Executable**
+   This step copies the `devopsfetch` script to `/usr/local/bin` and makes it executable.
+
+2. **Creates and Set Permissions for the Log File**
    ```sh
-   chmod +x devopsfetch
+   touch /var/log/devopsfetch.log
+   chmod 666 /var/log/devopsfetch.log
    ```
 
-3. **Move the Script to a Directory in Your PATH**
+   This step creates the log file at `/var/log/devopsfetch.log` and sets the permissions to allow all users to write to the log file.
+
+3. **Creates systemd Service File**
    ```sh
-   sudo mv devopsfetch /usr/local/bin/devopsfetch
+   cat << EOF > /etc/systemd/system/devopsfetch.service
+   [Unit]
+   Description=DevOpsFetch Monitoring Service
+   After=network.target
+
+   [Service]
+   ExecStart=/bin/bash -c '/usr/local/bin/devopsfetch -t "$(date -d \"5 minutes ago\" +\"%Y-%m-%d %H:%M:%S\")" "$(date +\"%Y-%m-%d %H:%M:%S\")"'
+   Restart=always
+   User=root
+
+   [Install]
+   WantedBy=multi-user.target
+   EOF
    ```
 
-4. **Set Up Log Directory and Permissions**
+   This step creates a systemd service file that runs the `devopsfetch` script every 5 minutes, capturing activities within that timeframe. The service is configured to restart automatically.
+
+4. **Creates systemd Timer File**
    ```sh
-   sudo mkdir -p /var/log/devopsfetch
-   sudo touch /var/log/devopsfetch/devopsfetch.log
-   sudo chown $(whoami) /var/log/devopsfetch/devopsfetch.log
+   cat << EOF > /etc/systemd/system/devopsfetch.timer
+   [Unit]
+   Description=Run DevOpsFetch every 5 minutes
+
+   [Timer]
+   OnBootSec=5min
+   OnUnitActiveSec=5min
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+   EOF
    ```
+
+   This step creates a systemd timer file that schedules the `devopsfetch` service to run every 5 minutes after booting and every 5 minutes thereafter.
+
+5. **Reloads systemd, Enable and Start the Service and Timer**
+   ```sh
+   systemctl daemon-reload
+   systemctl enable devopsfetch.service
+   systemctl enable devopsfetch.timer
+   systemctl start devopsfetch.timer
+   ```
+
+   This step reloads the systemd manager configuration, enables the `devopsfetch` service and timer, and starts the timer.
+
+6. **Sets Up Log Rotation**
+   ```sh
+   cat << EOF > /etc/logrotate.d/devopsfetch
+   /var/log/devopsfetch.log {
+       hourly
+       rotate 288
+       compress
+       missingok
+       notifempty
+       create 666 root root
+   }
+   EOF
+   ```
+
+   This step sets up log rotation for the `devopsfetch` log file. The logs are rotated hourly, with up to 288 rotations kept (equivalent to 12 days of logs), and old logs are compressed.
+
+7. **Completion Message**
+   ```sh
+   echo "DevOpsFetch has been installed and configured."
+
+   ```
+
+   This step prints a confirmation message indicating that `DevOpsFetch` has been successfully installed and configured.
+   
+By following these steps, you will have successfully installed and configured the `DevOpsFetch` tool. The tool will run every 5 minutes, logging its activities to `/var/log/devopsfetch.log`, and the log files will be managed through log rotation.
 
 ## Usage Examples
 
